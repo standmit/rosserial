@@ -1,0 +1,3 @@
+[submodule "rosserial_stm32"]
+	path = rosserial_stm32
+	url = https://github.com/standmit/rosserial_stm32
