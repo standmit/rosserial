@@ -316,6 +316,8 @@ class RosSerialServer:
                 return 0
             raise
 
+from parser_buffer import ParserBuffer
+
 class SerialClient(object):
     """
         ServiceServer responds to requests from the serial device.
@@ -363,6 +365,8 @@ class SerialClient(object):
 
         if rospy.is_shutdown():
             return
+        
+        self._buffer = ParserBuffer(self.port.read)
 
         time.sleep(0.1)           # Wait for ready (patch for Uno)
 
@@ -430,7 +434,7 @@ class SerialClient(object):
             result = bytearray()
             while bytes_remaining != 0 and time.time() - read_start < self.timeout:
                 with self.read_lock:
-                    received = self.port.read(bytes_remaining)
+                    received = self._buffer.read(bytes_remaining)
                 if len(received) != 0:
                     self.last_read = rospy.Time.now()
                     result.extend(received)
@@ -479,6 +483,7 @@ class SerialClient(object):
                 flag = [0, 0]
                 read_step = 'syncflag'
                 flag[0] = self.tryRead(1)
+                self._buffer.commit()
                 if (flag[0] != '\xff'):
                     continue
 
@@ -494,6 +499,7 @@ class SerialClient(object):
                     else:
                         found_ver_msg = "Protocol version of client is unrecognized"
                     rospy.loginfo("%s, expected %s" % (found_ver_msg, protocol_ver_msgs[self.protocol_ver]))
+                    self._buffer.rollback()
                     continue
 
                 # Read message length.
@@ -510,6 +516,7 @@ class SerialClient(object):
                 if msg_len_checksum % 256 != 255:
                     rospy.loginfo("wrong checksum for msg length, length %d" %(msg_length))
                     rospy.loginfo("chk is %d" % ord(msg_len_chk))
+                    self._buffer.rollback()
                     continue
 
                 # Read topic id (2 bytes)
@@ -542,8 +549,10 @@ class SerialClient(object):
                         rospy.logerr("Tried to publish before configured, topic id %d" % topic_id)
                         self.requestTopics()
                     rospy.sleep(0.001)
+                    self._buffer.commit()
                 else:
                     rospy.loginfo("wrong checksum for topic id and msg")
+                    self._buffer.rollback()
 
             except IOError as exc:
                 rospy.logwarn('Last read step: %s' % read_step)
@@ -555,6 +564,7 @@ class SerialClient(object):
                 with self.write_lock:
                     self.port.flushOutput()
                 self.requestTopics()
+                self._buffer.rollback()
 
     def setPublishSize(self, bytes):
         if self.buffer_out < 0:
